@@ -7,9 +7,11 @@ from pynput import keyboard
 import pytesseract
 from tkinter import ttk  # Добавляем для работы вкладок
 from datetime import datetime, timedelta
+import scipy.interpolate as interp # Для создания кривых
 
 
 # --- НАСТРОЙКИ ---
+pyautogui.PAUSE = 0
 THR_WINDOW = 0.55
 THR_CRYSTAL = 0.55
 pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
@@ -22,6 +24,35 @@ CRYSTAL_TEMPLATE = os.path.join(ITEMS_DIR, "crystal_anchor.png")
 for d in [ITEMS_DIR, DEBUG_DIR]:
     if not os.path.exists(d): os.makedirs(d)
 
+
+    class AreaSelector:
+        def __init__(self, callback):
+            self.callback = callback
+            self.root = tk.Tk()
+            self.root.attributes("-alpha", 0.3, "-topmost", True, "-fullscreen", True)
+            self.root.config(cursor="cross")
+            self.canvas = tk.Canvas(self.root, cursor="cross", bg="grey")
+            self.canvas.pack(fill="both", expand=True)
+            self.start_x = self.start_y = None
+            self.rect = None
+            self.canvas.bind("<ButtonPress-1>", self.on_press)
+            self.canvas.bind("<B1-Motion>", self.on_drag)
+            self.canvas.bind("<ButtonRelease-1>", self.on_release)
+            self.root.mainloop()
+
+        def on_press(self, e):
+            self.start_x, self.start_y = e.x, e.y
+            self.rect = self.canvas.create_rectangle(e.x, e.y, e.x, e.y, outline="red", width=2)
+
+        def on_drag(self, e):
+            self.canvas.coords(self.rect, self.start_x, self.start_y, e.x, e.y)
+
+        def on_release(self, e):
+            x1, y1, x2, y2 = min(self.start_x, e.x), min(self.start_y, e.y), max(self.start_x, e.x), max(self.start_y,
+                                                                                                         e.y)
+            self.root.destroy()
+            if x2 - x1 > 2 and y2 - y1 > 2:
+                self.callback(x1, y1, x2 - x1, y2 - y1)
 
 class BotApp:
     def __init__(self, root):
@@ -40,16 +71,24 @@ class BotApp:
         self.listener.start()
         self.log("🤖 Бот запущен. Логика D -> T -> ЛКМ добавлена.")
 
-    def click_image_random(self, name, thr=0.55):
+    def click_image_random(self, name, thr=0.55, clicks=1):
         if not self.is_running: return False
         rect = self.find_img_rect(name, thr)
         if rect:
             x, y, w, h = rect
-            # Кликаем в пределах 20-80% ширины и высоты кнопки
+            # Генерируем одну точку для всей серии кликов
             rx = x + random.randint(int(w * 0.2), int(w * 0.8))
             ry = y + random.randint(int(h * 0.2), int(h * 0.8))
+
             self.smooth_move(rx, ry)
-            pydirectinput.click()
+
+            # Цикл для нескольких нажатий
+            for i in range(clicks):
+                if not self.is_running: break
+                pydirectinput.click()
+                if clicks > 1:
+                    # Короткая пауза между кликами, чтобы игра засчитала их
+                    time.sleep(random.uniform(0.04, 0.08))
             return True
         return False
 
@@ -89,7 +128,50 @@ class BotApp:
 
     def smooth_move(self, x, y):
         if not self.is_running: return
-        pyautogui.moveTo(x, y, duration=random.uniform(0.3, 0.5), tween=pyautogui.easeInOutQuad)
+
+        start_x, start_y = pyautogui.position()
+        dist = np.hypot(x - start_x, y - start_y)
+
+        if dist < 5: return
+
+        # 1. Генерируем контрольные точки для кривой
+        cp_count = random.randint(2, 3)
+        x_pts = np.linspace(start_x, x, cp_count + 2)
+        y_pts = np.linspace(start_y, y, cp_count + 2)
+
+        # Смещение для дуги (0.1 - небольшая дуга, 0.2 - сильная)
+        offset = dist * random.uniform(0.1, 0.15)
+
+        for i in range(1, len(x_pts) - 1):
+            x_pts[i] += random.uniform(-offset, offset)
+            y_pts[i] += random.uniform(-offset, offset)
+
+        try:
+            t = np.linspace(0, 1, cp_count + 2)
+            px = interp.interp1d(t, x_pts, kind='quadratic')
+            py = interp.interp1d(t, y_pts, kind='quadratic')
+
+            # --- РЕГУЛИРОВКА СКОРОСТИ ---
+            # Уменьшаем число в делителе (было 15-25, стало 5-10), чтобы шагов стало БОЛЬШЕ
+            steps = int(dist / random.randint(5, 10))
+            if steps < 20: steps = 20  # Минимальное кол-во шагов для плавности
+
+            for i in range(steps + 1):
+                if not self.is_running: break
+                curr_t = i / steps
+
+                # Двигаем мышь
+                pyautogui.moveTo(int(px(curr_t)), int(py(curr_t)))
+
+                # Увеличиваем паузу (было 0.001, стало 0.005 - 0.01)
+                # Это основной параметр замедления
+                time.sleep(random.uniform(0.003, 0.0010))
+
+        except Exception as e:
+            # Резервный вариант: увеличиваем duration (было 0.3-0.6, стало 0.7-1.2)
+            pyautogui.moveTo(x, y, duration=random.uniform(0.5, 0.8), tween=pyautogui.easeInOutQuad)
+
+        # Пауза после завершения движения перед кликом
         time.sleep(random.uniform(0.1, 0.2))
 
     def type_smart(self, text):
@@ -103,9 +185,9 @@ class BotApp:
     def preprocess_for_ocr(self, img_np):
         b, g, r = cv2.split(img_np)
         gray = cv2.max(r, cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY))
-        gray = cv2.resize(gray, None, fx=10, fy=10, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.resize(gray, None, fx=15, fy=15, interpolation=cv2.INTER_CUBIC)
         gray = cv2.blur(gray, (2, 2))
-        _, thresh = cv2.threshold(gray, 146, 255, cv2.THRESH_BINARY_INV)
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
         return thresh
 
     def find_img_rect(self, name, thr=0.55, force_brightness=None):
@@ -142,7 +224,6 @@ class BotApp:
         if not self.is_running: return
         pydirectinput.press('d')
         self.smart_sleep(random.uniform(0.4, 0.6))
-
         # 1. Сначала ищем кнопку, чтобы узнать, куда кликать "в никуда"
         rect = self.find_img_rect("btn_divine_trial", thr=0.65)
 
@@ -151,17 +232,19 @@ class BotApp:
             press_count = random.randint(1, 3)
             self.log(f"💠 Кнопка найдена. Прокликиваю {press_count} раз(а)...")
 
+            # Генерируем одну точку клика для всей серии
+            rx = x + random.randint(int(w * 0.2), int(w * 0.8))
+            ry = y + random.randint(int(h * 0.2), int(h * 0.8))
+
+            # 1. ПЛАВНО подводим мышь один раз
+            self.smooth_move(rx, ry)
+
+            # 2. МГНОВЕННО стреляем кликами
             for i in range(press_count):
-                # Кликаем в область, где БЫЛА кнопка (даже если она исчезнет)
-                rx = x + random.randint(int(w * 0.2), int(w * 0.8))
-                ry = y + random.randint(int(h * 0.2), int(h * 0.8))
-
-                self.smooth_move(rx, ry)
                 pydirectinput.click()
+                # Минимальный микро-сон, чтобы игра не "подавилась" скоростью
+                time.sleep(random.uniform(0.01, 0.03))
                 self.log(f"🖱️ Клик {i + 1} выполнен")
-
-                # Короткая пауза между быстрыми кликами
-                self.smart_sleep(random.uniform(0.05, 0.12))
         else:
             self.log("⚠️ Не нашел кнопку 'Испытание', пропускаю прокликивание")
             return
@@ -236,11 +319,11 @@ class BotApp:
             need = 100
         if need <= 0: return
         self.log(f"🛒 Рынок: {name}. Нужно: {need}")
-        self.smart_sleep(random.uniform(0.07, 0.1))
+        self.smart_sleep(random.uniform(0.1, 0.1))
         pydirectinput.press('b');
-        self.smart_sleep(random.uniform(0.07, 0.1))
+        self.smart_sleep(random.uniform(0.1, 0.14))
         if not self.random_click("btn_trade_house"): return
-        self.smart_sleep(random.uniform(0.01, 0.1))
+        self.smart_sleep(random.uniform(0.1, 0.12))
         if not self.random_click("btn_search_input"): return
         for _ in range(5): pydirectinput.press('backspace')
         pydirectinput.keyDown('shift');
@@ -315,12 +398,12 @@ class BotApp:
                     lot_count = 1
                 self.smooth_move(cx, cy);
                 pydirectinput.click();
-                self.smart_sleep(0.2)
+                time.sleep(random.uniform(0.4, 0.6))
                 buy_btn = self.find_img("Купить", thr=0.55)
                 if buy_btn:
                     self.smooth_move(buy_btn[0], buy_btn[1]);
                     pydirectinput.click();
-                    self.smart_sleep(0.2)
+                    time.sleep(random.uniform(0.4, 0.6))
                     conf_btn = self.find_img("Подтвердить_закупку", thr=0.55)
                     if conf_btn:
                         self.smooth_move(conf_btn[0], conf_btn[1]);
@@ -359,67 +442,70 @@ class BotApp:
         # --- ШАГ 2: ДЕЙСТВИЯ В БОЮ ---
         z_aim = self.config.get("click_zones", {}).get("zone_move_aim")
         if z_aim:
-            # Бег W
             rx, ry = self.get_random_pt(z_aim)
-            self.smooth_move(rx, ry)
+            self.smooth_move(rx, ry) # Движение по кривой
             self.hold_key('w', random.uniform(0.56, 0.65))
 
-            # Механика и портал
+            self.log("🤖 Активация механики + хаотичный обзор...")
             pydirectinput.press('d')
-            time.sleep(random.uniform(0.01, 0.1))
+            time.sleep(random.uniform(0.05, 0.1))
             pydirectinput.press('t')
-            time.sleep(random.uniform(1.5, 2.0))
 
-            # Остановка (ЛКМ)
+            # Хаос вместо паузы
+            start_wait = time.time()
+            wait_duration = random.uniform(1.5, 2.0)
+            while time.time() - start_wait < wait_duration:
+                if not self.is_running: break
+                mx = random.randint(-50, 50)
+                my = random.randint(-40, 40)
+                pyautogui.moveRel(mx, my, duration=random.uniform(0.1, 0.2))
+                time.sleep(random.uniform(0.05, 0.1))
+
+            # Остановка
             z_stop = self.config.get("click_zones", {}).get("zone_stop_mech")
             if z_stop:
                 sx, sy = self.get_random_pt(z_stop)
-                self.smooth_move(sx, sy);
+                self.smooth_move(sx, sy) # Возврат по кривой
                 pydirectinput.click()
-
-                # Сбор лута (A)
                 self.loot_process()
 
-                # Вход в портал (D)
-                time.sleep(random.uniform(0.01, 0.1))
+                time.sleep(random.uniform(0.1, 0.2))
                 pydirectinput.press('d')
-                self.log("🚪 Зашел в портал. Жду город...")
 
-                # --- ШАГ 3: ВОЗВРАТ В ГОРОД И СБРОС ---
-                time.sleep(random.uniform(0.3, 0.4))
-                town_img = "Область_загрузки_город" if os.path.exists(
-                    os.path.join(ITEMS_DIR, "Область_загрузки_город.png")) else "Область_загрузки"
+        # --- ШАГ 3: ВОЗВРАТ В ГОРОД ---
+        time.sleep(random.uniform(0.3, 0.4))
+        town_img = "Область_загрузки_city" if os.path.exists(
+            os.path.join(ITEMS_DIR, "Область_загрузки_city.png")) else "Область_загрузки"
 
-                if self.wait_for_img_with_log(town_img, "⏳ Ожидание загрузки города..."):
-                    z_town = self.config.get("click_zones", {}).get("zone_town_aim")
-                    if z_town:
-                        tx, ty = self.get_random_pt(z_town)
-                        self.smooth_move(tx, ty)
-                        self.hold_key('w', random.uniform(0.55, 0.65))
+        if self.wait_for_img_with_log(town_img, "⏳ Ожидание загрузки города..."):
+            z_town = self.config.get("click_zones", {}).get("zone_town_aim")
+            if z_town:
+                tx, ty = self.get_random_pt(z_town)
+                self.smooth_move(tx, ty)
+                self.hold_key('w', random.uniform(0.55, 0.65))
 
-                        # Взаимодействие с NPC
-                        self.log("🗣️ Открываю диалог (D)...")
-                        pydirectinput.press('d')
-                        self.smart_sleep(random.uniform(0.8, 0.1))  # Даем меню открыться
+                pydirectinput.press('d')
+                self.smart_sleep(random.uniform(0.8, 1.0))
 
-                        # 1. Клик по пункту "Испытание божественности"
-                        if self.random_click("btn_npc_dialog_text"):
-                            self.smart_sleep(random.uniform(0.01, 0.1))
+                # Цепочка диалогов с рандомными кликами (1-3)
+                if self.random_click_v2("btn_npc_dialog_text"):
+                    self.smart_sleep(random.uniform(0.4, 0.6))
+                    if self.random_click_v2("zone_finish_call"):
+                        self.smart_sleep(random.uniform(0.4, 0.6))
+                        if self.random_click_v2("zone_confirm_exit"):
+                            self.log("✅ Вызов завершен.")
+                            self.smart_sleep(random.uniform(0.4, 0.6))
+                            pydirectinput.press('space')
+                            return True
+        return False
 
-                            # 2. Клик по области "Закончить вызов"
-                            if self.random_click("zone_finish_call"):
-                                self.smart_sleep(random.uniform(0.01, 0.1))
-
-                                # 3. Клик по области "Подтвердить"
-                                if self.random_click("zone_confirm_exit"):
-                                    self.smart_sleep(random.uniform(0.1, 0.2))
-                                    self.log("✅ Вызов завершен. Возврат к проверке ресурсов...")
-                                    # Нажимаем Пробел или ESC, чтобы закрыть оставшиеся окна, если нужно
-                                    pydirectinput.press('space')
-                                    return True
-
-                        self.log("❌ Ошибка в цепочке диалога NPC.")
-                        return False
+    def random_click_v2(self, key):
+        """Вспомогательный метод для рандомного кол-ва кликов по зоне"""
+        count = random.randint(1, 3)
+        for _ in range(count):
+            if not self.random_click(key): return False
+            time.sleep(random.uniform(0.04, 0.07))
+        return True
 
     def get_random_pt(self, z):
         return (z['x'] + random.randint(5, max(6, z['w'] - 5)),
@@ -453,15 +539,16 @@ class BotApp:
         if not self.is_running: return False
         self.log("⚔️ Поиск кнопок входа по шаблонам...")
 
-        # Ищем кнопку НАЧАТЬ
-        rect_start = self.find_img_rect("Начать_фарм", thr=0.65)
-        if rect_start:
-            # Кликаем рандомно ВНУТРИ найденной картинки
-            self.click_image_random("Начать_фарм", thr=0.65)
+        # 1. Кликаем на "Начать_фарм" (от 1 до 3 раз)
+        count_start = random.randint(1, 3)
+        if self.click_image_random("Начать_фарм", thr=0.65, clicks=count_start):
+            self.log(f"✅ Нажал 'Начать' ({count_start} раз)")
             self.smart_sleep(random.uniform(0.7, 1.2))
 
-            # Ищем кнопку ПОДТВЕРДИТЬ
-            if self.click_image_random("Подтвердить_фарм", thr=0.65):
+            # 2. Кликаем на "Подтвердить_фарм" (от 1 до 3 раз)
+            count_conf = random.randint(1, 3)
+            if self.click_image_random("Подтвердить_фарм", thr=0.65, clicks=count_conf):
+                self.log(f"✅ Нажал 'Подтвердить' ({count_conf} раз)")
                 self.smart_sleep(random.uniform(0.3, 0.5))
                 return self.wait_for_loading_and_move()
             else:
@@ -484,33 +571,91 @@ class BotApp:
             self.end_time = self.start_time + timedelta(hours=hours)
 
             self.log(f"🕒 Старт. Бот проработает до {self.end_time.strftime('%H:%M:%S')}")
-            time.sleep(2)
+
+            # --- ОБРАТНЫЙ ОТСЧЕТ ---
+            for i in range(5, 0, -1):
+                if not self.is_running: return
+                self.log(f"🕒 Старт через {i}... Переключитесь на игру!")
+                time.sleep(1)
+
+                # ВАЖНО: Делаем клик, чтобы окно игры стало активным
+            self.log("🖱️ Активирую окно игры...")
+            pydirectinput.click()
+            time.sleep(0.5)
+
+            self.log("🚀 Поехали! Нажимаю D...")
+            # ------------------------------------
 
             items = ["Герб Охоты", "Герб Войны", "Герб Могущества", "Герб Механизмов"]
 
             while self.is_running:
-                # ПРОВЕРКА: Если текущее время больше времени окончания — стоп
                 if datetime.now() >= self.end_time:
-                    self.log("⏰ Время работы вышло. Завершаю фарм.")
+                    self.log("⏰ Время работы вышло.")
                     break
 
                 self.update_all_stocks()
                 ready = True
+
                 for name in items:
                     if not self.is_running: return
+
+                    # Если ресурса не хватает
                     if self.real_stock[name] < int(self.min_stock_ent.get() or 1):
                         ready = False
-                        pydirectinput.press('space')
-                        self.market_buy_process(name)
-                        pydirectinput.press('d')
-                        self.smart_sleep(0.5)
-                        rect_loop = self.find_img_rect("btn_divine_trial", thr=0.65)
-                        if rect_loop:
-                            lx, ly, lw, lh = rect_loop
-                            for _ in range(random.randint(1, 3)):
-                                self.smooth_move(lx + random.randint(5, lw - 5), ly + random.randint(5, lh - 5))
-                                pydirectinput.click()
-                                self.smart_sleep(0.1)
+                        pydirectinput.press('space')  # Закрыть всё
+                        self.market_buy_process(name)  # Закупка
+
+                        # --- ЦИКЛ 5 ПОПЫТОК НАЖАТЬ "ИСПЫТАНИЕ" ---
+                        found_button = False
+                        for attempt in range(1, 6):
+                            if not self.is_running: return
+                            self.log(f"🔄 Попытка {attempt}/5: открываю меню NPC...")
+
+                            pydirectinput.press('space')
+                            self.smart_sleep(0.5)
+                            pydirectinput.press('d')
+
+                            # Ждем появления кнопки 2.5 секунды
+                            wait_start = time.time()
+                            while time.time() - wait_start < 2.5:
+                                if not self.is_running: return
+                                rect_loop = self.find_img_rect("btn_divine_trial", thr=0.65)
+                                if rect_loop:
+                                    lx, ly, lw, lh = rect_loop
+                                    rx = lx + random.randint(5, lw - 5)
+                                    ry = ly + random.randint(5, lh - 5)
+                                    self.smooth_move(rx, ry)
+
+                                    for _ in range(random.randint(1, 3)):
+                                        pydirectinput.click()
+                                        time.sleep(random.uniform(0.05, 0.1))
+
+                                    found_button = True
+                                    break  # Выход из while
+                                time.sleep(0.2)
+
+                            if found_button: break  # Выход из for (попытки)
+
+                        if not found_button:
+                            self.log("❌ Не вошел в меню за 5 попыток. Стоп.")
+                            self.is_running = False
+                            return
+
+                        # ВАЖНО: После закупки и нажатия кнопки мы прерываем цикл предметов,
+                        # чтобы снова зайти в update_all_stocks и убедиться, что всё купилось.
+                        break
+
+                        # ТОЛЬКО КОГДА ВСЕ ПРЕДМЕТЫ ПРОВЕРЕНЫ И ready == True
+                if ready and self.is_running:
+                    self.log("🚀 Все ресурсы готовы, начинаю фарм...")
+                    if self.start_farm_process():
+                        self.stats["cycles"] += 1
+                        self.root.after(0, self.update_stat_ui)
+                        self.log(f"🏁 Круг #{self.stats['cycles']} завершен.")
+                        self.smart_sleep(random.uniform(1.0, 2.0))
+                else:
+                    self.log("🔄 Ресурсы не готовы или была дозакупка, проверяю снова...")
+                    self.smart_sleep(1.0)
 
                 if ready and self.is_running:
                     # Начинаем фарм (метод доделает круг до конца, даже если время выйдет в процессе)

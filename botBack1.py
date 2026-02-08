@@ -185,9 +185,9 @@ class BotApp:
     def preprocess_for_ocr(self, img_np):
         b, g, r = cv2.split(img_np)
         gray = cv2.max(r, cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY))
-        gray = cv2.resize(gray, None, fx=10, fy=10, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.resize(gray, None, fx=15, fy=15, interpolation=cv2.INTER_CUBIC)
         gray = cv2.blur(gray, (2, 2))
-        _, thresh = cv2.threshold(gray, 146, 255, cv2.THRESH_BINARY_INV)
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
         return thresh
 
     def find_img_rect(self, name, thr=0.55, force_brightness=None):
@@ -319,11 +319,11 @@ class BotApp:
             need = 100
         if need <= 0: return
         self.log(f"🛒 Рынок: {name}. Нужно: {need}")
-        self.smart_sleep(random.uniform(0.07, 0.1))
+        self.smart_sleep(random.uniform(0.1, 0.1))
         pydirectinput.press('b');
-        self.smart_sleep(random.uniform(0.07, 0.1))
+        self.smart_sleep(random.uniform(0.1, 0.14))
         if not self.random_click("btn_trade_house"): return
-        self.smart_sleep(random.uniform(0.01, 0.1))
+        self.smart_sleep(random.uniform(0.1, 0.12))
         if not self.random_click("btn_search_input"): return
         for _ in range(5): pydirectinput.press('backspace')
         pydirectinput.keyDown('shift');

@@ -185,9 +185,9 @@ class BotApp:
     def preprocess_for_ocr(self, img_np):
         b, g, r = cv2.split(img_np)
         gray = cv2.max(r, cv2.cvtColor(img_np, cv2.COLOR_BGR2GRAY))
-        gray = cv2.resize(gray, None, fx=10, fy=10, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.resize(gray, None, fx=15, fy=15, interpolation=cv2.INTER_CUBIC)
         gray = cv2.blur(gray, (2, 2))
-        _, thresh = cv2.threshold(gray, 146, 255, cv2.THRESH_BINARY_INV)
+        _, thresh = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY_INV)
         return thresh
 
     def find_img_rect(self, name, thr=0.55, force_brightness=None):
@@ -251,52 +251,25 @@ class BotApp:
 
         self.smart_sleep(0.8)
         items = ["Герб Охоты", "Герб Войны", "Герб Могущества", "Герб Механизмов"]
-
-        for name in items:
-            if not self.is_running: break
-            rect = self.config.get("click_zones", {}).get(f"zone_stock_{name.replace(' ', '_')}")
-
-            if rect:
+        for n in items:
+            zone = self.config.get("stock_zones", {}).get(n)
+            if zone:
+                img = pyautogui.screenshot(region=(zone['x'], zone['y'], zone['w'], zone['h']))
+                processed = self.preprocess_for_ocr(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
+                txt = pytesseract.image_to_string(processed, config=r'--psm 7 -c tessedit_char_whitelist=0123456789/')
                 try:
-                    x, y, w, h = rect
-                    img = pyautogui.screenshot(region=(x, y, w, h))
-                    img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
-
-                    # 1. Scale 15 (Огромное увеличение для точности)
-                    img_cv = cv2.resize(img_cv, None, fx=15, fy=15, interpolation=cv2.INTER_CUBIC)
-
-                    # 2. Перевод в оттенки серого
-                    gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-
-                    # 3. Blur 2 (преобразовано в 3, т.к. должно быть нечетным)
-                    gray = cv2.GaussianBlur(gray, (2, 2), 4)
-
-                    # 4. Threshold 179
-                    _, thresh = cv2.threshold(gray, 179, 255, cv2.THRESH_BINARY_INV)
-
-                    # 5. Morph -4 (в OpenCV заменено на 0, т.к. отрицательных не бывает)
-                    # Если нужно сужение линий, используется морфология ERODE
-
-                    # Распознавание
-                    custom_config = r'--psm 7 -c tessedit_char_whitelist=0123456789'
-                    text = pytesseract.image_to_string(thresh, config=custom_config)
-
-                    clean_text = "".join(filter(str.isdigit, text))
-                    self.real_stock[name] = int(clean_text) if clean_text else 0
-
-                except Exception as e:
-                    self.log(f"⚠️ Ошибка OCR {name}: {e}")
-                    self.real_stock[name] = 0
-
-        self.log("✅ Данные о гербах обновлены.")
+                    self.real_stock[n] = int(txt.split('/')[0])
+                except:
+                    self.real_stock[n] = 0
+        self.log(f"📋 Запас обновлен: {list(self.real_stock.values())}")
 
     def collect_from_market(self):
         pydirectinput.press('esc');
-        self.smart_sleep(random.uniform(0.01, 0.1))
+        self.smart_sleep(random.uniform(0.11, 0.15))
         self.random_click("btn_market_history_1");
-        self.smart_sleep(random.uniform(0.01, 0.1))
+        self.smart_sleep(random.uniform(0.11, 0.15))
         self.random_click("btn_market_history_2");
-        self.smart_sleep(random.uniform(0.01, 0.1))
+        self.smart_sleep(random.uniform(0.11, 0.15))
         if self.random_click("btn_collect_all"): self.smart_sleep(random.uniform(4, 5))
         pydirectinput.press('space')
 
@@ -346,11 +319,11 @@ class BotApp:
             need = 100
         if need <= 0: return
         self.log(f"🛒 Рынок: {name}. Нужно: {need}")
-        self.smart_sleep(random.uniform(0.07, 0.1))
+        self.smart_sleep(random.uniform(0.11, 0.1))
         pydirectinput.press('b');
-        self.smart_sleep(random.uniform(0.07, 0.1))
+        self.smart_sleep(random.uniform(0.15, 0.2))
         if not self.random_click("btn_trade_house"): return
-        self.smart_sleep(random.uniform(0.01, 0.1))
+        self.smart_sleep(random.uniform(0.11, 0.12))
         if not self.random_click("btn_search_input"): return
         for _ in range(5): pydirectinput.press('backspace')
         pydirectinput.keyDown('shift');
@@ -360,8 +333,8 @@ class BotApp:
         pydirectinput.press('h');
         pydirectinput.press(',');
         pydirectinput.press('enter')
-        self.smart_sleep(random.uniform(0.1, 0.2))
-        cat_pos = self.find_img(name, thr=0.55)
+        self.smart_sleep(random.uniform(0.11, 0.2))
+        cat_pos = self.find_img(name, thr=0.40)
         if not cat_pos: pydirectinput.press('space'); return
         self.smooth_move(cat_pos[0], cat_pos[1]);
         pydirectinput.click();
@@ -370,7 +343,7 @@ class BotApp:
         if btn_pos:
             self.smooth_move(btn_pos[0], btn_pos[1]);
             pydirectinput.click();
-            self.smart_sleep(0.8)
+            self.smart_sleep(1.5)
             base_p = self.get_market_price()
             if base_p > 0:
                 price_to_type = "{:.2f}".format(base_p + 0.1)
@@ -378,17 +351,17 @@ class BotApp:
                 if off_pos:
                     self.smooth_move(off_pos[0], off_pos[1]);
                     pydirectinput.click();
-                    self.smart_sleep(0.4)
+                    self.smart_sleep(1)
                     filt_pos = self.find_img("price_filter_template")
                     if filt_pos:
                         self.smooth_move(filt_pos[0], filt_pos[1]);
                         pydirectinput.click();
-                        self.smart_sleep(0.4)
+                        self.smart_sleep(1)
                         if self.random_click("btn_item_price"):
                             for _ in range(4): pydirectinput.press('backspace')
                             self.type_smart(price_to_type);
                             pydirectinput.press('enter');
-                            self.smart_sleep(0.1)
+                            self.smart_sleep(0.13)
                             conf_pos = self.find_img("Подтвердить")
                             if conf_pos: self.smooth_move(conf_pos[0],
                                                           conf_pos[1]); pydirectinput.click(); self.smart_sleep(0.6)
@@ -425,12 +398,12 @@ class BotApp:
                     lot_count = 1
                 self.smooth_move(cx, cy);
                 pydirectinput.click();
-                self.smart_sleep(0.2)
-                buy_btn = self.find_img("Купить", thr=0.55)
+                time.sleep(random.uniform(0.4, 0.6))
+                buy_btn = self.find_img("Купить", thr=0.40)
                 if buy_btn:
                     self.smooth_move(buy_btn[0], buy_btn[1]);
                     pydirectinput.click();
-                    self.smart_sleep(0.2)
+                    time.sleep(random.uniform(0.4, 0.6))
                     conf_btn = self.find_img("Подтвердить_закупку", thr=0.55)
                     if conf_btn:
                         self.smooth_move(conf_btn[0], conf_btn[1]);
@@ -521,6 +494,7 @@ class BotApp:
                         self.smart_sleep(random.uniform(0.4, 0.6))
                         if self.random_click_v2("zone_confirm_exit"):
                             self.log("✅ Вызов завершен.")
+                            self.smart_sleep(random.uniform(0.4, 0.6))
                             pydirectinput.press('space')
                             return True
         return False
@@ -557,7 +531,7 @@ class BotApp:
         while time.time() - start < 25:
             if not self.is_running: return False
             # Используем rect, так как find_img удален
-            if self.find_img_rect(img_name, thr=0.65): return True
+            if self.find_img_rect(img_name, thr=0.55): return True
             time.sleep(random.uniform(0.8, 1))
         return False
 
@@ -567,13 +541,13 @@ class BotApp:
 
         # 1. Кликаем на "Начать_фарм" (от 1 до 3 раз)
         count_start = random.randint(1, 3)
-        if self.click_image_random("Начать_фарм", thr=0.65, clicks=count_start):
+        if self.click_image_random("Начать_фарм", thr=0.55, clicks=count_start):
             self.log(f"✅ Нажал 'Начать' ({count_start} раз)")
             self.smart_sleep(random.uniform(0.7, 1.2))
 
             # 2. Кликаем на "Подтвердить_фарм" (от 1 до 3 раз)
             count_conf = random.randint(1, 3)
-            if self.click_image_random("Подтвердить_фарм", thr=0.65, clicks=count_conf):
+            if self.click_image_random("Подтвердить_фарм", thr=0.55, clicks=count_conf):
                 self.log(f"✅ Нажал 'Подтвердить' ({count_conf} раз)")
                 self.smart_sleep(random.uniform(0.3, 0.5))
                 return self.wait_for_loading_and_move()
@@ -610,62 +584,88 @@ class BotApp:
             time.sleep(0.5)
 
             self.log("🚀 Поехали! Нажимаю D...")
-            # ------------------------------------sdfasf
-
-            self.log(f"📊 Анализ (S:15, T:179, B:2, M:-3) + RedFix...")
+            # ------------------------------------
 
             items = ["Герб Охоты", "Герб Войны", "Герб Могущества", "Герб Механизмов"]
 
-            for name in items:
-                if not self.is_running: break
-                rect = self.config.get("click_zones", {}).get(f"zone_stock_{name.replace(' ', '_')}")
+            while self.is_running:
+                if datetime.now() >= self.end_time:
+                    self.log("⏰ Время работы вышло.")
+                    break
 
-                if rect:
-                    try:
-                        x, y, w, h = rect
-                        img = np.array(pyautogui.screenshot(region=(x, y, w, h)))
-                        img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+                self.update_all_stocks()
+                ready = True
 
-                        # 1. УЛУЧШЕНИЕ КРАСНОГО (как в твоем тестере)
-                        b, g, r = cv2.split(img)
-                        gray = cv2.max(r, cv2.cvtColor(img, cv2.COLOR_BGR2GRAY))
+                for name in items:
+                    if not self.is_running: return
 
-                        # 2. МАСШТАБ (Scale 15)
-                        sc = 15
-                        gray = cv2.resize(gray, None, fx=sc, fy=sc, interpolation=cv2.INTER_CUBIC)
+                    # Если ресурса не хватает
+                    if self.real_stock[name] < int(self.min_stock_ent.get() or 1):
+                        ready = False
+                        pydirectinput.press('space')  # Закрыть всё
+                        self.market_buy_process(name)  # Закупка
 
-                        # 3. РАЗМЫТИЕ (Blur 2 -> превращаем в 3 для OpenCV)
-                        bl = 2
-                        k_size = bl if bl % 2 != 0 else bl + 1
-                        gray = cv2.GaussianBlur(gray, (k_size, k_size), 0)
+                        # --- ЦИКЛ 5 ПОПЫТОК НАЖАТЬ "ИСПЫТАНИЕ" ---
+                        found_button = False
+                        for attempt in range(1, 6):
+                            if not self.is_running: return
+                            self.log(f"🔄 Попытка {attempt}/5: открываю меню NPC...")
 
-                        # 4. ПОРОГ (Threshold 179)
-                        _, final = cv2.threshold(gray, 179, 255, cv2.THRESH_BINARY)
+                            pydirectinput.press('space')
+                            self.smart_sleep(0.5)
+                            pydirectinput.press('d')
 
-                        # 5. ИНВЕРСИЯ (чтобы текст был черным для Tesseract)
-                        final = cv2.bitwise_not(final)
+                            # Ждем появления кнопки 2.5 секунды
+                            wait_start = time.time()
+                            while time.time() - wait_start < 2.5:
+                                if not self.is_running: return
+                                rect_loop = self.find_img_rect("btn_divine_trial", thr=0.55)
+                                if rect_loop:
+                                    lx, ly, lw, lh = rect_loop
+                                    rx = lx + random.randint(5, lw - 5)
+                                    ry = ly + random.randint(5, lh - 5)
+                                    self.smooth_move(rx, ry)
 
-                        # 6. МОРФОЛОГИЯ (Твоя логика: минус = сужение, плюс = расширение)
-                        m_val = -3
-                        if m_val != 0:
-                            kernel = np.ones((abs(m_val), abs(m_val)), np.uint8)
-                            if m_val > 0:
-                                final = cv2.dilate(final, kernel, iterations=1)
-                            else:
-                                final = cv2.erode(final, kernel, iterations=1)
+                                    for _ in range(random.randint(1, 3)):
+                                        pydirectinput.click()
+                                        time.sleep(random.uniform(0.05, 0.1))
 
-                        # OCR
-                        custom_config = r'--psm 7 -c tessedit_char_whitelist=0123456789/'
-                        text = pytesseract.image_to_string(final, config=custom_config).strip()
+                                    found_button = True
+                                    break  # Выход из while
+                                time.sleep(0.2)
 
-                        clean_text = "".join(filter(str.isdigit, text))
-                        self.real_stock[name] = int(clean_text) if clean_text else 0
+                            if found_button: break  # Выход из for (попытки)
 
-                    except Exception as e:
-                        self.log(f"⚠️ Ошибка OCR {name}: {e}")
-                        self.real_stock[name] = 0
+                        if not found_button:
+                            self.log("❌ Не вошел в меню за 5 попыток. Стоп.")
+                            self.is_running = False
+                            return
 
-            self.log("✅ Данные о гербах обновлены.")
+                        # ВАЖНО: После закупки и нажатия кнопки мы прерываем цикл предметов,
+                        # чтобы снова зайти в update_all_stocks и убедиться, что всё купилось.
+                        break
+
+                        # ТОЛЬКО КОГДА ВСЕ ПРЕДМЕТЫ ПРОВЕРЕНЫ И ready == True
+                if ready and self.is_running:
+                    self.log("🚀 Все ресурсы готовы, начинаю фарм...")
+                    if self.start_farm_process():
+                        self.stats["cycles"] += 1
+                        self.root.after(0, self.update_stat_ui)
+                        self.log(f"🏁 Круг #{self.stats['cycles']} завершен.")
+                        self.smart_sleep(random.uniform(1.0, 2.0))
+                else:
+                    self.log("🔄 Ресурсы не готовы или была дозакупка, проверяю снова...")
+                    self.smart_sleep(1.0)
+
+                if ready and self.is_running:
+                    # Начинаем фарм (метод доделает круг до конца, даже если время выйдет в процессе)
+                    if self.start_farm_process():
+                        self.stats["cycles"] += 1
+                        self.root.after(0, self.update_stat_ui)
+                        self.log(f"🏁 Круг #{self.stats['cycles']} завершен.")
+                        self.smart_sleep(random.uniform(0.4, 1.3))
+                else:
+                    self.log("🔄 Ресурсы не готовы, повтор...")
         finally:
             self.is_running = False
             self.root.after(0, self.finish_stop_ui)
