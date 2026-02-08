@@ -599,38 +599,55 @@ class BotApp:
                     if self.real_stock[name] < int(self.min_stock_ent.get() or 1):
                         ready = False
                         pydirectinput.press('space')
-                        self.market_buy_process(name)
-                        pydirectinput.press('d')
-                        self.log(f"⏳ Ожидаю появление кнопки 'Испытание'...")
-
-                        rect_loop = None
-                        wait_start = time.time()
-
-                        # ЦИКЛ ОЖИДАНИЯ КНОПКИ
-                        while rect_loop is None:
+                        found_button = False
+                        for attempt in range(1, 6):  # Цикл от 1 до 5
                             if not self.is_running: return
 
-                            rect_loop = self.find_img_rect("btn_divine_trial", thr=0.65)
+                            self.log(f"🔄 Попытка {attempt}/5: открываю меню NPC...")
 
-                            if rect_loop:
-                                lx, ly, lw, lh = rect_loop
-                                rx = lx + random.randint(5, lw - 5)
-                                ry = ly + random.randint(5, lh - 5)
+                            # 1. Сброс: закрываем возможные зависшие окна
+                            pydirectinput.press('space')
+                            self.smart_sleep(0.6)
 
-                                self.smooth_move(rx, ry)
+                            # 2. Открытие: жмем D
+                            pydirectinput.press('d')
 
-                                for _ in range(random.randint(1, 3)):
-                                    pydirectinput.click()
-                                    time.sleep(random.uniform(0.04, 0.08))
-                                break  # Выходим из цикла ожидания, так как кнопка найдена и нажата
+                            # 3. Ожидание: даем игре 2.5 секунды, чтобы кнопка появилась
+                            wait_start = time.time()
+                            while time.time() - wait_start < 2.5:
+                                if not self.is_running: return
 
-                            # Если ждем долго (например, больше 2 секунд), пробуем нажать D еще раз
-                            if time.time() - wait_start > 2.0:
-                                self.log("🔁 Повторное нажатие 'D'...")
-                                pydirectinput.press('d')
-                                wait_start = time.time()  # Сбрасываем таймер ожидания
+                                # Ищем кнопку "Испытание"
+                                rect_loop = self.find_img_rect("btn_divine_trial", thr=0.65)
+                                if rect_loop:
+                                    self.log(f"✅ Кнопка найдена на попытке {attempt}!")
+                                    lx, ly, lw, lh = rect_loop
 
-                            time.sleep(0.2)  # Короткая пауза между проверками экрана
+                                    # Рассчитываем случайную точку внутри кнопки
+                                    rx = lx + random.randint(5, lw - 5)
+                                    ry = ly + random.randint(5, lh - 5)
+
+                                    # Плавное движение и клик
+                                    self.smooth_move(rx, ry)
+                                    for _ in range(random.randint(1, 3)):
+                                        pydirectinput.click()
+                                        time.sleep(random.uniform(0.05, 0.1))
+
+                                    found_button = True
+                                    break  # Выход из WHILE (кнопка нажата)
+
+                                time.sleep(0.2)  # Пауза между проверками экрана
+
+                            if found_button:
+                                break  # Выход из FOR (попытки завершены успешно)
+
+                            self.log(f"⚠️ Кнопка не появилась на попытке {attempt}")
+
+                        # Если после 5 попыток кнопка так и не найдена
+                        if not found_button:
+                            self.log("❌ КРИТИЧЕСКАЯ ОШИБКА: Меню NPC не открылось за 5 попыток. Стоп.")
+                            self.is_running = False
+                            return  # Полная остановка бота
 
                 if ready and self.is_running:
                     # Начинаем фарм (метод доделает круг до конца, даже если время выйдет в процессе)
