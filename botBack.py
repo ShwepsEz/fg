@@ -564,7 +564,7 @@ class BotApp:
 
     def bot_loop(self):
         try:
-            # Настройка времени (как в твоем коде)
+            # Настройка времени и старт
             try:
                 val = self.work_time_ent.get().replace(',', '.')
                 hours = float(val) if val else 6.0
@@ -572,28 +572,27 @@ class BotApp:
                 hours = 6.0
             self.start_time = datetime.now()
             self.end_time = self.start_time + timedelta(hours=hours)
-            self.log(f"🕒 Старт до {self.end_time.strftime('%H:%M:%S')}")
+            self.log(f"🕒 Старт. Бот активен до {self.end_time.strftime('%H:%M:%S')}")
 
-            # Обратный отсчет
             for i in range(5, 0, -1):
                 if not self.is_running: return
                 self.log(f"🕒 Старт через {i}...")
                 time.sleep(1)
 
-            pydirectinput.click()  # Активация окна
+            pydirectinput.click()  # Активация окна игры
 
             items = ["Герб Охоты", "Герб Войны", "Герб Могущества", "Герб Механизмов"]
 
             while self.is_running:
                 if datetime.now() >= self.end_time: break
 
-                # --- 1. ПРОВЕРКА ГЕРБОВ И ВХОД В МЕНЮ (5 ПОПЫТОК) ---
+                # --- ШАГ 1: СИЛОВОЕ ОТКРЫТИЕ МЕНЮ (5 ПОПЫТОК) ---
                 found_menu = False
                 for attempt in range(1, 6):
                     if not self.is_running: return
 
-                    self.log(f"🔄 Попытка {attempt}/5: Открываю меню NPC (D)...")
-                    pydirectinput.press('space')  # Сброс всех окон
+                    self.log(f"🔄 Попытка {attempt}/5: Вход в меню NPC...")
+                    pydirectinput.press('space')  # Сброс (как ты просил)
                     self.smart_sleep(0.5)
                     pydirectinput.press('d')  # Нажать D
 
@@ -612,38 +611,42 @@ class BotApp:
                         time.sleep(0.2)
 
                     if found_menu: break
-                    self.log(f"⚠️ Кнопка не найдена на попытке {attempt}. Жму Space и пробуем снова.")
+                    self.log(f"⚠️ Кнопка не найдена на попытке {attempt}.")
 
                 if not found_menu:
-                    self.log("❌ Не удалось войти в меню за 5 попыток. Остановка.")
+                    self.log("❌ Не удалось войти в меню. Остановка.")
                     self.is_running = False
                     return
 
-                # --- 2. ОБНОВЛЕНИЕ СТОКОВ (КОГДА МЫ УЖЕ ВНУТРИ) ---
-                self.update_all_stocks()  # Здесь только OCR цифр
+                # --- ШАГ 2: ПРОВЕРКА ГЕРБОВ (ТОЛЬКО КОГДА МЕНЮ ОТКРЫТО) ---
+                # Даем 0.5с на прогрузку цифр после клика по "Испытание"
+                self.smart_sleep(1)
+                self.update_all_stocks()  # Теперь OCR сработает, так как мы в нужном окне
 
                 ready = True
                 for name in items:
                     if not self.is_running: return
+                    # Проверяем, что считалось корректно (как в botBack1.py)
                     if self.real_stock[name] < int(self.min_stock_ent.get() or 1):
                         ready = False
-                        self.log(f"🛒 Мало {name}, иду на рынок...")
-                        pydirectinput.press('space')  # Закрыть меню для рынка
+                        self.log(f"🛒 Недостаточно {name} ({self.real_stock[name]} шт.), иду покупать...")
+                        pydirectinput.press('space')  # Закрыть всё для рынка
                         self.market_buy_process(name)
-                        # После рынка мы выходим из цикла предметов, чтобы
-                        # главный цикл while снова начал с 5 попыток входа в меню
+                        # После рынка выходим из цикла предметов, чтобы начать
+                        # заново с открытия меню NPC (Шаг 1)
                         break
 
-                        # --- 3. ЗАПУСК ФАРМА ---
+                        # --- ШАГ 3: ЗАПУСК ФАРМА ---
                 if ready and self.is_running:
                     self.log("🚀 Ресурсы в норме, начинаю фарм...")
                     if self.start_farm_process():
                         self.stats["cycles"] += 1
                         self.root.after(0, self.update_stat_ui)
                         self.log(f"🏁 Круг #{self.stats['cycles']} завершен.")
+                        self.smart_sleep(1.0)
 
         except Exception as e:
-            self.log(f"❌ Ошибка: {e}")
+            self.log(f"❌ Критическая ошибка: {e}")
         finally:
             self.is_running = False
             self.root.after(0, self.finish_stop_ui)
