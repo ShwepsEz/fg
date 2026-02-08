@@ -245,9 +245,7 @@ class BotApp:
                 # Минимальный микро-сон, чтобы игра не "подавилась" скоростью
                 time.sleep(random.uniform(0.01, 0.03))
                 self.log(f"🖱️ Клик {i + 1} выполнен")
-        else:
-            self.log("⚠️ Не нашел кнопку 'Испытание', пропускаю прокликивание")
-            return
+                time.sleep(random.uniform(0.01, 0.03))
 
         self.smart_sleep(0.8)
         items = ["Герб Охоты", "Герб Войны", "Герб Могущества", "Герб Механизмов"]
@@ -560,112 +558,90 @@ class BotApp:
 
     def bot_loop(self):
         try:
-            # Считываем время из поля ввода
+            # 1. Настройка времени
             try:
-                hours = float(self.work_time_ent.get().replace(',', '.'))
+                val = self.work_time_ent.get().replace(',', '.')
+                hours = float(val) if val else 6.0
             except:
                 hours = 6.0
-                self.log("⚠️ Ошибка ввода времени, ставлю 6ч")
-
             self.start_time = datetime.now()
             self.end_time = self.start_time + timedelta(hours=hours)
+            self.log(f"🕒 Старт. Работа до {self.end_time.strftime('%H:%M:%S')}")
 
-            self.log(f"🕒 Старт. Бот проработает до {self.end_time.strftime('%H:%M:%S')}")
-
-            # --- ОБРАТНЫЙ ОТСЧЕТ ---
+            # 2. Таймер 5 секунд
             for i in range(5, 0, -1):
                 if not self.is_running: return
-                self.log(f"🕒 Старт через {i}... Переключитесь на игру!")
+                self.log(f"🕒 Старт через {i}...")
                 time.sleep(1)
 
-                # ВАЖНО: Делаем клик, чтобы окно игры стало активным
-            self.log("🖱️ Активирую окно игры...")
-            pydirectinput.click()
-            time.sleep(0.5)
-
-            self.log("🚀 Поехали! Нажимаю D...")
-            # ------------------------------------
-
+            pydirectinput.click()  # Активация окна игры
             items = ["Герб Охоты", "Герб Войны", "Герб Могущества", "Герб Механизмов"]
 
             while self.is_running:
-                if datetime.now() >= self.end_time:
-                    self.log("⏰ Время работы вышло.")
-                    break
+                if datetime.now() >= self.end_time: break
 
-                self.update_all_stocks()
-                ready = True
-
-                for name in items:
+                # --- ШАГ 1: ПОИСК КНОПКИ "ИСПЫТАНИЕ" (5 ПОПЫТОК) ---
+                found_trial = False
+                for attempt in range(1, 6):
                     if not self.is_running: return
 
-                    # Если ресурса не хватает
+                    self.log(f"🔄 Попытка {attempt}/5: Нажимаю D и ищу кнопку...")
+                    pydirectinput.press('d')
+
+                    # Ждем появления кнопки 2 секунды (активное ожидание)
+                    wait_start = time.time()
+                    while time.time() - wait_start < 2.0:
+                        if not self.is_running: return
+                        rect = self.find_img_rect("btn_divine_trial", thr=0.65)
+                        if rect:
+                            lx, ly, lw, lh = rect
+                            self.smooth_move(lx + lw // 2, ly + lh // 2)
+                            pydirectinput.click()
+                            self.log("✅ Кнопка 'Испытание' нажата!")
+                            found_trial = True
+                            break
+                        time.sleep(0.2)
+
+                    if found_trial: break  # Если нажали, выходим из цикла попыток
+
+                    # Если НЕ нашли кнопку — жмем Space и пробуем следующую попытку
+                    self.log(f"⚠️ Кнопка не найдена. Жму Space для сброса.")
+                    pydirectinput.press('space')
+                    self.smart_sleep(0.8)
+
+                # Если после 5 попыток кнопка так и не появилась — СТОП
+                if not found_trial:
+                    self.log("❌ КРИТИЧЕСКАЯ ОШИБКА: Кнопка не найдена за 5 попыток. Выход.")
+                    self.is_running = False
+                    return
+
+                # --- ШАГ 2: ПРОВЕРКА ГЕРБОВ (ТОЛЬКО КОГДА МЕНЮ ОТКРЫТО) ---
+                self.smart_sleep(1.0)  # Даем время прогрузиться цифрам
+                self.update_all_stocks()  # Твоя рабочая логика OCR
+
+                ready = True
+                for name in items:
+                    if not self.is_running: return
                     if self.real_stock[name] < int(self.min_stock_ent.get() or 1):
                         ready = False
-                        pydirectinput.press('space')  # Закрыть всё
-                        self.market_buy_process(name)  # Закупка
-
-                        # --- ЦИКЛ 5 ПОПЫТОК НАЖАТЬ "ИСПЫТАНИЕ" ---
-                        found_button = False
-                        for attempt in range(1, 6):
-                            if not self.is_running: return
-                            self.log(f"🔄 Попытка {attempt}/5: открываю меню NPC...")
-
-                            pydirectinput.press('space')
-                            self.smart_sleep(0.5)
-                            pydirectinput.press('d')
-
-                            # Ждем появления кнопки 2.5 секунды
-                            wait_start = time.time()
-                            while time.time() - wait_start < 2.5:
-                                if not self.is_running: return
-                                rect_loop = self.find_img_rect("btn_divine_trial", thr=0.65)
-                                if rect_loop:
-                                    lx, ly, lw, lh = rect_loop
-                                    rx = lx + random.randint(5, lw - 5)
-                                    ry = ly + random.randint(5, lh - 5)
-                                    self.smooth_move(rx, ry)
-
-                                    for _ in range(random.randint(1, 3)):
-                                        pydirectinput.click()
-                                        time.sleep(random.uniform(0.05, 0.1))
-
-                                    found_button = True
-                                    break  # Выход из while
-                                time.sleep(0.2)
-
-                            if found_button: break  # Выход из for (попытки)
-
-                        if not found_button:
-                            self.log("❌ Не вошел в меню за 5 попыток. Стоп.")
-                            self.is_running = False
-                            return
-
-                        # ВАЖНО: После закупки и нажатия кнопки мы прерываем цикл предметов,
-                        # чтобы снова зайти в update_all_stocks и убедиться, что всё купилось.
+                        self.log(f"🛒 Мало {name} ({self.real_stock[name]} шт.). Иду покупать...")
+                        pydirectinput.press('space')  # Закрыть всё перед рынком
+                        self.market_buy_process(name)
+                        # После покупки выходим из цикла предметов, чтобы начать
+                        # заново с нажатия D и 5 попыток (Шаг 1)
                         break
 
-                        # ТОЛЬКО КОГДА ВСЕ ПРЕДМЕТЫ ПРОВЕРЕНЫ И ready == True
+                        # --- ШАГ 3: ЗАПУСК ФАРМА (ЕСЛИ ВСЁ ОК) ---
                 if ready and self.is_running:
-                    self.log("🚀 Все ресурсы готовы, начинаю фарм...")
+                    self.log("🚀 Ресурсы в норме, начинаю фарм...")
                     if self.start_farm_process():
                         self.stats["cycles"] += 1
                         self.root.after(0, self.update_stat_ui)
                         self.log(f"🏁 Круг #{self.stats['cycles']} завершен.")
-                        self.smart_sleep(random.uniform(1.0, 2.0))
-                else:
-                    self.log("🔄 Ресурсы не готовы или была дозакупка, проверяю снова...")
-                    self.smart_sleep(1.0)
+                        self.smart_sleep(1.0)
 
-                if ready and self.is_running:
-                    # Начинаем фарм (метод доделает круг до конца, даже если время выйдет в процессе)
-                    if self.start_farm_process():
-                        self.stats["cycles"] += 1
-                        self.root.after(0, self.update_stat_ui)
-                        self.log(f"🏁 Круг #{self.stats['cycles']} завершен.")
-                        self.smart_sleep(random.uniform(0.4, 1.3))
-                else:
-                    self.log("🔄 Ресурсы не готовы, повтор...")
+        except Exception as e:
+            self.log(f"❌ Ошибка в основном цикле: {e}")
         finally:
             self.is_running = False
             self.root.after(0, self.finish_stop_ui)
