@@ -398,12 +398,12 @@ class BotApp:
                     lot_count = 1
                 self.smooth_move(cx, cy);
                 pydirectinput.click();
-                self.smart_sleep(0.2)
+                time.sleep(random.uniform(0.4, 0.6))
                 buy_btn = self.find_img("Купить", thr=0.55)
                 if buy_btn:
                     self.smooth_move(buy_btn[0], buy_btn[1]);
                     pydirectinput.click();
-                    self.smart_sleep(0.2)
+                    time.sleep(random.uniform(0.4, 0.6))
                     conf_btn = self.find_img("Подтвердить_закупку", thr=0.55)
                     if conf_btn:
                         self.smooth_move(conf_btn[0], conf_btn[1]);
@@ -494,6 +494,7 @@ class BotApp:
                         self.smart_sleep(random.uniform(0.4, 0.6))
                         if self.random_click_v2("zone_confirm_exit"):
                             self.log("✅ Вызов завершен.")
+                            self.smart_sleep(random.uniform(0.4, 0.6))
                             pydirectinput.press('space')
                             return True
         return False
@@ -594,60 +595,67 @@ class BotApp:
 
                 self.update_all_stocks()
                 ready = True
+
                 for name in items:
                     if not self.is_running: return
+
+                    # Если ресурса не хватает
                     if self.real_stock[name] < int(self.min_stock_ent.get() or 1):
                         ready = False
-                        pydirectinput.press('space')
-                        found_button = False
-                        for attempt in range(1, 6):  # Цикл от 1 до 5
-                            if not self.is_running: return
+                        pydirectinput.press('space')  # Закрыть всё
+                        self.market_buy_process(name)  # Закупка
 
+                        # --- ЦИКЛ 5 ПОПЫТОК НАЖАТЬ "ИСПЫТАНИЕ" ---
+                        found_button = False
+                        for attempt in range(1, 6):
+                            if not self.is_running: return
                             self.log(f"🔄 Попытка {attempt}/5: открываю меню NPC...")
 
-                            # 1. Сброс: закрываем возможные зависшие окна
                             pydirectinput.press('space')
-                            self.smart_sleep(0.6)
-
-                            # 2. Открытие: жмем D
+                            self.smart_sleep(0.5)
                             pydirectinput.press('d')
 
-                            # 3. Ожидание: даем игре 2.5 секунды, чтобы кнопка появилась
+                            # Ждем появления кнопки 2.5 секунды
                             wait_start = time.time()
                             while time.time() - wait_start < 2.5:
                                 if not self.is_running: return
-
-                                # Ищем кнопку "Испытание"
                                 rect_loop = self.find_img_rect("btn_divine_trial", thr=0.65)
                                 if rect_loop:
-                                    self.log(f"✅ Кнопка найдена на попытке {attempt}!")
                                     lx, ly, lw, lh = rect_loop
-
-                                    # Рассчитываем случайную точку внутри кнопки
                                     rx = lx + random.randint(5, lw - 5)
                                     ry = ly + random.randint(5, lh - 5)
-
-                                    # Плавное движение и клик
                                     self.smooth_move(rx, ry)
+
                                     for _ in range(random.randint(1, 3)):
                                         pydirectinput.click()
                                         time.sleep(random.uniform(0.05, 0.1))
 
                                     found_button = True
-                                    break  # Выход из WHILE (кнопка нажата)
+                                    break  # Выход из while
+                                time.sleep(0.2)
 
-                                time.sleep(0.2)  # Пауза между проверками экрана
+                            if found_button: break  # Выход из for (попытки)
 
-                            if found_button:
-                                break  # Выход из FOR (попытки завершены успешно)
-
-                            self.log(f"⚠️ Кнопка не появилась на попытке {attempt}")
-
-                        # Если после 5 попыток кнопка так и не найдена
                         if not found_button:
-                            self.log("❌ КРИТИЧЕСКАЯ ОШИБКА: Меню NPC не открылось за 5 попыток. Стоп.")
+                            self.log("❌ Не вошел в меню за 5 попыток. Стоп.")
                             self.is_running = False
-                            return  # Полная остановка бота
+                            return
+
+                        # ВАЖНО: После закупки и нажатия кнопки мы прерываем цикл предметов,
+                        # чтобы снова зайти в update_all_stocks и убедиться, что всё купилось.
+                        break
+
+                        # ТОЛЬКО КОГДА ВСЕ ПРЕДМЕТЫ ПРОВЕРЕНЫ И ready == True
+                if ready and self.is_running:
+                    self.log("🚀 Все ресурсы готовы, начинаю фарм...")
+                    if self.start_farm_process():
+                        self.stats["cycles"] += 1
+                        self.root.after(0, self.update_stat_ui)
+                        self.log(f"🏁 Круг #{self.stats['cycles']} завершен.")
+                        self.smart_sleep(random.uniform(1.0, 2.0))
+                else:
+                    self.log("🔄 Ресурсы не готовы или была дозакупка, проверяю снова...")
+                    self.smart_sleep(1.0)
 
                 if ready and self.is_running:
                     # Начинаем фарм (метод доделает круг до конца, даже если время выйдет в процессе)
