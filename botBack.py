@@ -221,47 +221,27 @@ class BotApp:
         return True
 
     def update_all_stocks(self):
+        """
+        Метод только считывает значения ресурсов с экрана.
+        Логика нажатия кнопок отсюда удалена, чтобы не конфликтовать с основным циклом.
+        """
         if not self.is_running: return
-        pydirectinput.press('d')
-        self.smart_sleep(random.uniform(0.4, 0.6))
-        # 1. Сначала ищем кнопку, чтобы узнать, куда кликать "в никуда"
-        rect = self.find_img_rect("btn_divine_trial", thr=0.65)
 
-        if rect:
-            x, y, w, h = rect
-            press_count = random.randint(1, 3)
-            self.log(f"💠 Кнопка найдена. Прокликиваю {press_count} раз(а)...")
+        self.log("📊 Обновляю данные о ресурсах...")
 
-            # Генерируем одну точку клика для всей серии
-            rx = x + random.randint(int(w * 0.2), int(w * 0.8))
-            ry = y + random.randint(int(h * 0.2), int(h * 0.8))
-
-            # 1. ПЛАВНО подводим мышь один раз
-            self.smooth_move(rx, ry)
-
-            # 2. МГНОВЕННО стреляем кликами
-            for i in range(press_count):
-                pydirectinput.click()
-                # Минимальный микро-сон, чтобы игра не "подавилась" скоростью
-                time.sleep(random.uniform(0.01, 0.03))
-                self.log(f"🖱️ Клик {i + 1} выполнен")
-        else:
-            self.log("⚠️ Не нашел кнопку 'Испытание', пропускаю прокликивание")
-            return
-
-        self.smart_sleep(0.8)
         items = ["Герб Охоты", "Герб Войны", "Герб Могущества", "Герб Механизмов"]
-        for n in items:
-            zone = self.config.get("stock_zones", {}).get(n)
-            if zone:
-                img = pyautogui.screenshot(region=(zone['x'], zone['y'], zone['w'], zone['h']))
-                processed = self.preprocess_for_ocr(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
-                txt = pytesseract.image_to_string(processed, config=r'--psm 7 -c tessedit_char_whitelist=0123456789/')
-                try:
-                    self.real_stock[n] = int(txt.split('/')[0])
-                except:
-                    self.real_stock[n] = 0
-        self.log(f"📋 Запас обновлен: {list(self.real_stock.values())}")
+
+        for name in items:
+            if not self.is_running: break
+
+            # Получаем значение через Tesseract/OCR
+            value = self.get_stock_value(name)
+            self.real_stock[name] = value
+
+            # (Опционально) Логируем каждое значение для контроля
+            # self.log(f"🔎 {name}: {value}")
+
+        self.log("✅ Данные обновлены.")
 
     def collect_from_market(self):
         pydirectinput.press('esc');
