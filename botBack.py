@@ -221,47 +221,51 @@ class BotApp:
         return True
 
     def update_all_stocks(self):
+        """
+        МЕТОД ТОЛЬКО ДЛЯ ПРОВЕРКИ ГЕРБОВ.
+        Логика кликов удалена, чтобы не мешать основному циклу.
+        """
         if not self.is_running: return
+
+        # 1. Просто открываем меню, чтобы увидеть цифры
         pydirectinput.press('d')
-        self.smart_sleep(random.uniform(0.4, 0.6))
-        # 1. Сначала ищем кнопку, чтобы узнать, куда кликать "в никуда"
-        rect = self.find_img_rect("btn_divine_trial", thr=0.65)
-
-        if rect:
-            x, y, w, h = rect
-            press_count = random.randint(1, 3)
-            self.log(f"💠 Кнопка найдена. Прокликиваю {press_count} раз(а)...")
-
-            # Генерируем одну точку клика для всей серии
-            rx = x + random.randint(int(w * 0.2), int(w * 0.8))
-            ry = y + random.randint(int(h * 0.2), int(h * 0.8))
-
-            # 1. ПЛАВНО подводим мышь один раз
-            self.smooth_move(rx, ry)
-
-            # 2. МГНОВЕННО стреляем кликами
-            for i in range(press_count):
-                pydirectinput.click()
-                # Минимальный микро-сон, чтобы игра не "подавилась" скоростью
-                time.sleep(random.uniform(0.01, 0.03))
-                self.log(f"🖱️ Клик {i + 1} выполнен")
-        else:
-            self.log("⚠️ Не нашел кнопку 'Испытание', пропускаю прокликивание")
-            return
-
         self.smart_sleep(0.8)
+
+        self.log("📊 Проверяю запасы гербов...")
+
         items = ["Герб Охоты", "Герб Войны", "Герб Могущества", "Герб Механизмов"]
-        for n in items:
-            zone = self.config.get("stock_zones", {}).get(n)
-            if zone:
-                img = pyautogui.screenshot(region=(zone['x'], zone['y'], zone['w'], zone['h']))
-                processed = self.preprocess_for_ocr(cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR))
-                txt = pytesseract.image_to_string(processed, config=r'--psm 7 -c tessedit_char_whitelist=0123456789/')
+
+        for name in items:
+            if not self.is_running: break
+
+            # --- ТВОЯ РАБОЧАЯ ЛОГИКА ПРОВЕРКИ (НЕ МЕНЯЕМ) ---
+            # Бот берет координаты из конфига и распознает текст
+            rect = self.config.get("click_zones", {}).get(f"zone_stock_{name.replace(' ', '_')}")
+            if rect:
                 try:
-                    self.real_stock[n] = int(txt.split('/')[0])
-                except:
-                    self.real_stock[n] = 0
-        self.log(f"📋 Запас обновлен: {list(self.real_stock.values())}")
+                    x, y, w, h = rect
+                    img = pyautogui.screenshot(region=(x, y, w, h))
+                    img_cv = cv2.cvtColor(np.array(img), cv2.COLOR_RGB2BGR)
+
+                    # Подготовка для Tesseract
+                    gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
+                    _, thresh = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY_INV)
+
+                    custom_config = r'--psm 7 -c tessedit_char_whitelist=0123456789'
+                    text = pytesseract.image_to_string(thresh, config=custom_config)
+
+                    clean_text = "".join(filter(str.isdigit, text))
+                    value = int(clean_text) if clean_text else 0
+
+                    self.real_stock[name] = value
+                    # self.log(f"🔎 {name}: {value} шт.")
+                except Exception as e:
+                    self.log(f"⚠️ Ошибка OCR {name}: {e}")
+                    self.real_stock[name] = 0
+            # -----------------------------------------------
+
+        self.log("✅ Все гербы проверены.")
+        # КОНФЛИКТНЫЙ БЛОК ELSE С ЛОГОМ УДАЛЕН ОТСЮДА ПОЛНОСТЬЮ
 
     def collect_from_market(self):
         pydirectinput.press('esc');
@@ -599,55 +603,61 @@ class BotApp:
                 for name in items:
                     if not self.is_running: return
 
-                    # Если ресурса не хватает
                     if self.real_stock[name] < int(self.min_stock_ent.get() or 1):
                         ready = False
-                        pydirectinput.press('space')  # Закрыть всё
-                        self.market_buy_process(name)  # Закупка
+                        self.log(f"🛒 Недостаточно {name}, закупаю...")
+                        pydirectinput.press('space')
+                        self.market_buy_process(name)
 
-                        # --- ЦИКЛ 5 ПОПЫТОК НАЖАТЬ "ИСПЫТАНИЕ" ---
+                        # --- ТВОЯ НОВАЯ ЛОГИКА: 5 ПОПЫТОК С ЦИКЛОМ ---
                         found_button = False
                         for attempt in range(1, 6):
                             if not self.is_running: return
-                            self.log(f"🔄 Попытка {attempt}/5: открываю меню NPC...")
 
+                            self.log(f"🔄 Попытка {attempt}/5: поиск кнопки 'Испытание'...")
+
+                            # Нажимаем Space (закрыть окна) и потом D
                             pydirectinput.press('space')
                             self.smart_sleep(0.5)
                             pydirectinput.press('d')
 
-                            # Ждем появления кнопки 2.5 секунды
+                            # Внутренний цикл ожидания (ждем появления кнопки 2.5 сек)
                             wait_start = time.time()
                             while time.time() - wait_start < 2.5:
                                 if not self.is_running: return
+
                                 rect_loop = self.find_img_rect("btn_divine_trial", thr=0.65)
                                 if rect_loop:
                                     lx, ly, lw, lh = rect_loop
                                     rx = lx + random.randint(5, lw - 5)
                                     ry = ly + random.randint(5, lh - 5)
-                                    self.smooth_move(rx, ry)
 
+                                    self.smooth_move(rx, ry)
+                                    # Кликаем 1-3 раза
                                     for _ in range(random.randint(1, 3)):
                                         pydirectinput.click()
                                         time.sleep(random.uniform(0.05, 0.1))
 
                                     found_button = True
+                                    self.log("✅ Кнопка нажата успешно!")
                                     break  # Выход из while
                                 time.sleep(0.2)
 
-                            if found_button: break  # Выход из for (попытки)
+                            if found_button:
+                                break  # Выход из цикла попыток (for)
 
+                        # Если после 5 попыток кнопка НЕ НАЙДЕНА — выключаем бота
                         if not found_button:
-                            self.log("❌ Не вошел в меню за 5 попыток. Стоп.")
+                            self.log("❌ Кнопка 'Испытание' не найдена за 5 попыток. Остановка.")
                             self.is_running = False
                             return
 
-                        # ВАЖНО: После закупки и нажатия кнопки мы прерываем цикл предметов,
-                        # чтобы снова зайти в update_all_stocks и убедиться, что всё купилось.
+                            # Если кнопка найдена, прерываем цикл предметов, чтобы
+                        # зайти в update_all_stocks и обновить данные после закупки
                         break
 
-                        # ТОЛЬКО КОГДА ВСЕ ПРЕДМЕТЫ ПРОВЕРЕНЫ И ready == True
+                        # Если все ресурсы в норме (ready осталось True) — идем фармить
                 if ready and self.is_running:
-                    self.log("🚀 Все ресурсы готовы, начинаю фарм...")
                     if self.start_farm_process():
                         self.stats["cycles"] += 1
                         self.root.after(0, self.update_stat_ui)
