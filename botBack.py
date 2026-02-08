@@ -561,14 +561,14 @@ class BotApp:
         try:
             # Считываем время из поля ввода
             try:
-                hours = float(self.work_time_ent.get().replace(',', '.'))
+                val = self.work_time_ent.get().replace(',', '.')
+                hours = float(val) if val else 6.0
             except:
                 hours = 6.0
                 self.log("⚠️ Ошибка ввода времени, ставлю 6ч")
 
             self.start_time = datetime.now()
             self.end_time = self.start_time + timedelta(hours=hours)
-
             self.log(f"🕒 Старт. Бот проработает до {self.end_time.strftime('%H:%M:%S')}")
 
             # --- ОБРАТНЫЙ ОТСЧЕТ ---
@@ -577,13 +577,38 @@ class BotApp:
                 self.log(f"🕒 Старт через {i}... Переключитесь на игру!")
                 time.sleep(1)
 
-            # ВАЖНО: Делаем клик, чтобы окно игры стало активным
+            # Активация окна
             self.log("🖱️ Активирую окно игры...")
             pydirectinput.click()
             time.sleep(0.5)
-
             self.log("🚀 Поехали! Нажимаю D...")
-            # ------------------------------------
+            pydirectinput.press('d')
+
+            # НОВЫЙ БЛОК: Ждем меню ПЕРЕД тем как начать циклы
+            found_start = False
+            for i in range(1, 6):
+                if not self.is_running: return
+                self.log(f"⏳ Ожидание входа в меню (попытка {i}/5)...")
+
+                rect_start = self.find_img_rect("btn_divine_trial", thr=0.65)
+                if rect_start:
+                    lx, ly, lw, lh = rect_start
+                    self.smooth_move(lx + lw // 2, ly + lh // 2)
+                    for _ in range(random.randint(1, 2)):
+                        pydirectinput.click()
+                        time.sleep(0.05)
+                    found_start = True
+                    break
+
+                pydirectinput.press('space')
+                self.smart_sleep(0.5)
+                pydirectinput.press('d')
+                self.smart_sleep(1.5)
+
+            if not found_start:
+                self.log("❌ Не удалось войти в меню при старте. Стоп.")
+                self.is_running = False
+                return
 
             items = ["Герб Охоты", "Герб Войны", "Герб Могущества", "Герб Механизмов"]
 
@@ -598,65 +623,70 @@ class BotApp:
                 for name in items:
                     if not self.is_running: return
 
-                    if self.real_stock[name] < int(self.min_stock_ent.get() or 1):
+                    min_val = int(self.min_stock_ent.get() or 1)
+                    if self.real_stock[name] < min_val:
                         ready = False
                         self.log(f"🛒 Недостаточно {name}, иду на рынок...")
-                        pydirectinput.press('space')
-                        self.market_buy_process(name)
+                        pydirectinput.press('space')  # Закрыть меню NPC
+                        self.smart_sleep(0.5)
 
-                        # --- ЦИКЛ ПОПЫТОК (D -> ИСПЫТАНИЕ) ---
+                        self.market_buy_process(name)  # Закупка
+
+                        # --- ЛОГИКА ПОИСКА КНОПКИ "ИСПЫТАНИЕ" ПОСЛЕ ЗАКУПКИ ---
                         found_button = False
                         for attempt in range(1, 6):
                             if not self.is_running: return
 
-                            self.log(f"🔄 Попытка {attempt}/5: поиск 'Испытание'...")
-                            pydirectinput.press('space')
+                            self.log(f"🔄 Попытка {attempt}/5: поиск кнопки 'Испытание'...")
+                            pydirectinput.press('space')  # Сброс интерфейса
                             self.smart_sleep(0.5)
-                            pydirectinput.press('d')
+                            pydirectinput.press('d')  # Открываем меню
 
+                            # Ожидание появления картинки внутри попытки
                             wait_start = time.time()
-                            while time.time() - wait_start < 2.0:
+                            while time.time() - wait_start < 2.5:  # Увеличил до 2.5 сек
                                 if not self.is_running: return
+
                                 rect_loop = self.find_img_rect("btn_divine_trial", thr=0.65)
                                 if rect_loop:
+                                    self.log("✅ Кнопка найдена, нажимаю...")
                                     lx, ly, lw, lh = rect_loop
                                     rx = lx + random.randint(5, lw - 5)
                                     ry = ly + random.randint(5, lh - 5)
+
                                     self.smooth_move(rx, ry)
+                                    # Рандомные клики 1-3 раза
                                     for _ in range(random.randint(1, 3)):
                                         pydirectinput.click()
                                         time.sleep(random.uniform(0.04, 0.08))
 
                                     found_button = True
-                                    break
+                                    break  # Выход из while
                                 time.sleep(0.2)
 
                             if found_button:
-                                break
+                                break  # Выход из цикла попыток for
 
-                                # ВОТ ТУТ КРИТИЧЕСКОЕ ИЗМЕНЕНИЕ:
+                        # Если после всех попыток кнопка не найдена — СТОП
                         if not found_button:
-                            self.log("❌ Кнопка 'Испытание' не найдена за 5 попыток. Стоп.")
+                            self.log(f"❌ Кнопка 'Испытание' не появилась после закупки {name}. Остановка.")
                             self.is_running = False
-                            return
-                        else:
-                            # Если нашли кнопку, даем паузу, чтобы окно открылось
-                            # и ready стал True только после успешного входа
-                            self.smart_sleep(1.0)
+                            return  # Полный выход из bot_loop
 
-                            # Если все ресурсы закуплены и бот в нужном меню
+                # Если все проверки пройдены и ресурсы закуплены
                 if ready and self.is_running:
-                    # Начинаем фарм
                     if self.start_farm_process():
                         self.stats["cycles"] += 1
                         self.root.after(0, self.update_stat_ui)
                         self.log(f"🏁 Круг #{self.stats['cycles']} завершен.")
-                        self.smart_sleep(random.uniform(0.4, 1.3))
+                        self.smart_sleep(random.uniform(0.5, 1.5))
                 else:
                     if self.is_running:
-                        self.log("🔄 Ресурсы не готовы или сбой меню, повтор...")
+                        self.log("🔄 Подготовка ресурсов завершена, проверяю меню...")
                         self.smart_sleep(1.0)
 
+        except Exception as e:
+            self.log(f"❌ Ошибка в главном цикле: {e}")
         finally:
             self.is_running = False
             self.root.after(0, self.finish_stop_ui)
